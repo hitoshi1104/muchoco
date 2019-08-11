@@ -10,75 +10,149 @@
 		exit();
 	}
 
-	if($_POST['token'] === $_SESSION['token']) {
-		// url からスレッドを立てたのかコメントなのかを調べる
-		$check = explode('/', $_SERVER['HTTP_REFERER']);
-		$check = $check[count($check) - 1];
-		// テキストの投稿
-		if(isset($_POST['submitSentence'])) {
-			$postData['poster'] = empty($_SESSION['id']) ? null : $_SESSION['id'];
-			// ログインしていなければログインページへ飛ばす
-			if($postData['poster'] === null) {
-				header('Location: login.php');
-			}
-			$postData['sentence'] = empty($_POST['sentence']) ? null : htmlspecialchars($_POST['sentence'], ENT_QUOTES, 'UTF-8');
-			$postData['pictPath'] = null;
-			if(preg_match('/^\([0-9]+\/)', $check)) {
-				$postData['comment'] = substr($check, 1, count($check) - 2);
-			} else if(preg_match('/[0-9]/', $check)){
-				$postData['comment'] = $check;
-			} else {
-				$postData['comment'] = null;
-			}
-			$postData['comment'] = $postData['comment'] === null ? null : htmlspecialchars($postData['comment'], ENT_QUOTES, 'UTF-8');
+	// ログインチェック
+	if(empty($_SESSION['id']) || empty($_SESSION['name'])) {
+		$_SESSION = array();
+		setcookie(session_name(), '', time() - 1, '/');
+		session_destroy();
+		header('Location: ./index.php');
+		exit();
+	}
 
-			$board = new BulletinBoard();
-			if($board->postThread($postData)) {
-				// タイムスタンプを利用しユーザーの最終投稿を取得、投稿した内容が表示されるurlに飛ばす
-				header('Location: ./index.php');
-				exit();
-			} else {
-				// 失敗したら閲覧トップページへ
-				header('Location: ./index.php');
-				exit();
-			}
-			// ユーザーの登録 パスワードのハッシュ化
-			// $db = new MyDB();
-			$db = new Login();
-			if($db->addUser($_POST['mail'], $_POST['password1'])) {
-				echo '登録しました!<br>';
-	 		} else {
-				echo 'すでに登録されているメールアドレスのようです・・・<br>';
-			}
+	if($_POST['token'] !== $_SESSION['token']) {
+		$_SESSION = array();
+		setcookie(session_name(), '', time() - 1, '/');
+		session_destroy();
+		header('Location: ./index.php');
+		exit();
+	}
 
+	// 何をするにも実行者の id を取得
+	$postData['poster'] = empty($_SESSION['id']) ? null : htmlspecialchars($_SESSION['id'], ENT_QUOTES, 'UTF-8');
+	// ログインしていなければログインページへ飛ばす
+	if($postData['poster'] === null) {
+		header('Location: login.php');
+	}
 
-
-		} else if(isset($_POST['login'])) {
-			if(!empty($_POST['mail']) || !empty($_POST['password'])) {
-				error_log(print_r('Warning loginCheck.php::POSTの失敗 nmail = '.empty($_POST['mail']).' password ='.empty($_POST['password']).' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
-				exit();
+	// スレッドの削除
+	$threadNo = empty($_POST['threadNo']) ? null : htmlspecialchars($_POST['threadNo'], ENT_QUOTES, 'UTF-8');
+	if(isset($_POST['deleteThread']) && $threadNo !== null) {
+		$board = new BulletinBoard();
+		// 削除する画像のパスを取得する
+		$threads = $board->getSmallThread($threadNo);
+		$deletePictPath = [];
+		$counter = 0;
+		foreach($threads as $thread) {
+			if($thread['pict'] !== null) {
+				$deletePictPath[$counter]['pict'] = $thread['pict'];
 			}
-			// ログインチェック パスワードのハッシュ化
-			// $db = new MyDB();
-			$db = new Login();
-			$data = $db->loginCheck($_POST['mail'], $_POST['password']);
-			// var_dump($data);
-			if(count($data) !== 0) {
-				// echo 'ログイン完了<br>';
-				$_SESSION = array();
-				session_regenerate_id(true);
-				$_SESSION['id'] = $data['id'];
-				$_SESSION['name'] = $data['name'];
-				header("Location: index.php");
-				exit();
-			} else {
-				echo 'ログイン失敗<br>';
-				$_SESSION = array();
-				setcookie(session_name(), '', time() - 1, '/');
-				session_destroy();
+			$counter ++;
+		}
+		if($board->deleteThread($threadNo, $postData['poster'])) {
+			foreach($deletePictPath as $path) {
+				unlink($path['pict']);
 			}
 		}
+		header('Location: ./index.php');
+		exit();
+	} else if(isset($_POST['deleteComment']) && $threadNo !== null) {
+		$board = new BulletinBoard();
+		// 削除する画像のパスを取得する
+		$threads = $board->deleteCommentPict($threadNo, $postData['poster']);
+		$deletePictPath = [];
+		$counter = 0;
+		foreach($threads as $thread) {
+			if($thread['pict'] !== null) {
+				$deletePictPath[$counter]['pict'] = $thread['pict'];
+			}
+			$counter ++;
+		}
+		if($board->deleteComment($threadNo, $postData['poster'])) {
+			foreach($deletePictPath as $path) {
+				unlink($path['pict']);
+			}
+		}
+		header('Location: ./index.php');
+		exit();
+	} else if($threadNo !== null) {
+		header('Location: ./index.php');
+		exit();
+	}
+
+	// 登録内容を配列にする
+	// url からスレッドを立てたのかコメントなのかを調べる
+	$check = empty($_POST['check']) ? null : $_POST['check'];
+	$check = htmlspecialchars($check, ENT_QUOTES, 'UTF-8');
+	$postData['sentence'] = null;
+	$postData['pictPath'] = null;
+	if(!preg_match('/[0-9]/', $check)){
+		$postData['comment'] = null;
 	} else {
-		echo "もう一度ログインし直してください。<br>";
+		$postData['comment'] = $check;
+	}
+
+	// テキストの投稿
+	if(isset($_POST['submitSentence'])) {
+		$postData['sentence'] = empty($_POST['sentence']) ? null : htmlspecialchars($_POST['sentence'], ENT_QUOTES, 'UTF-8');
+	} else if(isset($_POST['submitPict'])) {
+		if(!isset($_FILES['pictPath']['error']) || !is_int($_FILES['pictPath']['error'])) {
+			error_log(print_r('Warning board.php::$_POST[submitPost] 不正なパラメータ ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			header('Location: ./index.php');
+			exit();
+		}
+		// ファイルサイズ制限
+		if ($_FILES['pictPath']['size'] > 1000000) {
+			// TODO アラートの作成
+			header('Location: ./index.php');
+			exit();
+  	}
+
+		$extension = array_search(mime_content_type($_FILES['pictPath']['tmp_name']),
+      array(
+					'.gif' => 'image/gif',
+          '.jpg' => 'image/jpeg',
+          '.png' => 'image/png',
+      ),
+      true
+		);
+
+		if(!$extension) {
+			error_log(print_r('Warning board.php::不正な拡張子：'.$extension.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			header('Location: ./index.php');
+			exit();
+		}
+
+		$fileName = './image/image'.date('YmdHis', time()).'-'.$postData['poster'].$extension;
+		$postData['pict'] = $fileName;
+		if(is_uploaded_file($_FILES['pictPath']['tmp_name'])) {
+	    if(move_uploaded_file($_FILES['pictPath']['tmp_name'], $fileName)) {
+				// パーミッションの変更
+				chmod($fileName, 0644);
+			}
+		}
+	}
+	// DBに登録
+	if($postData['sentence'] === null && $postData['pict'] === null) {
+		header('Location: ./index.php?d=1');
+		exit();
+	}
+	$board = new BulletinBoard();
+	$no = $board->postThread($postData);
+	if($check !== null) {
+		header('Location: ./index.php?d=('.$check.')');
+		exit();
+	}
+	if(0 < $no) {
+		if($postData['comment'] === null) {
+			$no = 0 < ($no % 50) ? 1 : $no % 50;
+		} else {
+			$no = '('.$no.')';
+		}
+		header('Location: ./index.php?d='.$no);
+		exit();
+	} else {
+		// 失敗したら閲覧トップページへ
+		header('Location: ./index.php?d=1');
+		exit();
 	}
 ?>

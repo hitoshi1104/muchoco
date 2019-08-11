@@ -123,7 +123,7 @@
 			// パスワードが一致したらパスワードを抜いた id と name の配列を返す
 			$arr['id'] = $result[0]['id'];
 			$arr['name'] = $result[0]['name'];
-			error_log(print_r('common.php::loginCheck() ログイン完了 '.$arr.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			error_log(print_r('common.php::loginCheck() ログイン完了 userId：'.$arr['id'].' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
 			return $arr;
 		}
 	}
@@ -159,30 +159,30 @@
 		}
 
 		/**
-		* 投稿する 成功したら true を返す
+		* 投稿する 成功したら登録した id を返す
+		* 				失敗したら 0 を返す
 		*
 		* @param int boardId
 		* @param array[userId][sentence][pictPath][commentId] postData
 		*
-		* @return boolean
+		* @return int
 		*/
 		public function postThread($postData) {
-			error_log(print_r('common.php::BulletinBoard->postThread() ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			error_log(print_r('common.php::BulletinBoard->postThread() userId：'.$postData['poster'].' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			error_log(print_r($postData, true), '3', 'log.txt');
 			if($this->dbh === null) return false;
-			$sql = 'INSERT INTO board (poster, sentence, pict, comment) VALUE (:pos, :sen, :pic, :com)';
+			$sql = 'INSERT INTO board (poster, sentence, pict, comment) VALUES (:pos, :sen, :pic, :com)';
 			$prepare = $this->dbh->prepare($sql);
 			$prepare->bindValue(':pos', $postData['poster'], PDO::PARAM_INT);
 			$prepare->bindValue(':sen', $postData['sentence'], PDO::PARAM_STR);
 			$prepare->bindValue(':pic', $postData['pict'], PDO::PARAM_STR);
 			$prepare->bindValue(':com', $postData['comment'], PDO::PARAM_STR);
-			error_log(print_r($prepare, true), '3', 'log.txt');
-			error_log(print_r($postData, true), '3', 'log.txt');
 			if($prepare->execute()) {
-				error_log(print_r('common.php::BulletinBoard->postThread() postData：'.$postData.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
-				return true;
+				error_log(print_r('common.php::BulletinBoard->postThread() ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+				return $this->getLastRecordId();
 			} else {
-				error_log(print_r('Warning common.php::BulletinBoard->postThread() postData：'.$postData.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
-				return false;
+				error_log(print_r('Warning common.php::BulletinBoard->postThread() ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+				return 0;
 			}
 		}
 
@@ -197,13 +197,107 @@
 			if(!isset($comment)) return 0;
 			if(!is_numeric($comment)) return 0;
 			if($this->dbh === null) return 0;
-			error_log(print_r('common.php::BulletinBoard->getCommentSum() commentSum：'.$comment.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			// error_log(print_r('common.php::BulletinBoard->getCommentSum() commentSum：'.$comment.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
 			$sql = 'SELECT count(no) FROM board WHERE comment = :c';
 			$prepare = $this->dbh->prepare($sql);
 			$prepare->bindValue(':c', $comment, PDO::PARAM_INT);
 			$prepare->execute();
 			$column = $prepare->fetchColumn();
 			return $column;
+		}
+
+		/**
+		* 追加された最後のレコードの id を返す
+		*/
+		private function getLastRecordId() {
+			// error_log(print_r('common.php::BulletinBoard->postThread() no：'.'['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			if($this->dbh === null) return false;
+			$sql = 'SELECT no FROM board ORDER BY no DESC LIMIT 1;';
+			$prepare = $this->dbh->prepare($sql);
+			$prepare->execute();
+			$no = $prepare->fetch(PDO::FETCH_ASSOC);
+			error_log(print_r($no, true), '3', 'log.txt');
+			$no = $no['no'];
+			if(0 < $no) {
+				return $no;
+			} else {
+				return 0;
+			}
+		}
+
+		/**
+		* 個々のスレッドを取得する
+		*
+		* @param int threadNo
+		*
+		* @return array
+		*/
+		public function getSmallThread($threadNo) {
+			if($this->dbh === null) return [];
+			error_log(print_r('common.php::BulletinBoard->getBigThread() threadNo：'.$threadNo.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			$sql = 'SELECT * FROM board WHERE no=:n OR comment=:n ORDER BY no ASC';
+			$prepare = $this->dbh->prepare($sql);
+			$prepare->bindValue(':n', $threadNo, PDO::PARAM_INT);
+			$prepare->execute();
+			$boardThread = $prepare->fetchAll(PDO::FETCH_ASSOC);
+			return $boardThread;
+		}
+
+		/**
+		* コメントの削除 成功したら true を返す
+		*
+		* @param int threadId
+		* @param int poster
+		*
+		* @return boolean
+		*/
+		public function deleteComment($threadNo, $poster) {
+			if($this->dbh === null) return false;
+			error_log(print_r('common.php::BulletinBoard->deleteComment() threadNo：'.$threadNo.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			$sql = 'DELETE FROM board WHERE no=:n AND poster=:p';
+			$prepare = $this->dbh->prepare($sql);
+			$prepare->bindValue(':n', $threadNo, PDO::PARAM_INT);
+			$prepare->bindValue(':p', $poster, PDO::PARAM_INT);
+			if($prepare->execute()) return ture;
+			return false;
+		}
+
+		/**
+		* 削除対象のコメントのパスを返す
+		*
+		* @param int threadId
+		* @param int poster
+		*
+		* @return String
+		*/
+		public function deleteCommentPict($threadNo, $poster) {
+			if($this->dbh === null) return false;
+			error_log(print_r('common.php::BulletinBoard->deleteCommentPict() threadNo：'.$threadNo.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			$sql = 'SELECT pict FROM board WHERE no=:n AND poster=:p';
+			$prepare = $this->dbh->prepare($sql);
+			$prepare->bindValue(':n', $threadNo, PDO::PARAM_INT);
+			$prepare->bindValue(':p', $poster, PDO::PARAM_INT);
+			$prepare->execute();
+			return $prepare->fetchAll(PDO::FETCH_ASSOC);
+		}
+
+		/**
+		* スレッドの削除 成功したら true を返す
+		*
+		* @param int threadId
+		* @param int poster
+		*
+		* @return boolean
+		*/
+		public function deleteThread($threadNo, $poster) {
+			if($this->dbh === null) return false;
+			error_log(print_r('common.php::BulletinBoard->deleteThread() threadNo：'.$threadNo.' poster：'.$poster.' ['.date('Y-m-d H:i:s', time()).']'."\n", true), '3', 'log.txt');
+			$sql = 'DELETE FROM board WHERE (no=:n AND poster=:p) OR comment=:n';
+			$prepare = $this->dbh->prepare($sql);
+			$prepare->bindValue(':n', $threadNo, PDO::PARAM_INT);
+			$prepare->bindValue(':p', $poster, PDO::PARAM_INT);
+			if($prepare->execute()) return ture;
+			return false;
 		}
 	}
 ?>

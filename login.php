@@ -51,6 +51,7 @@
 			return false;
  		} else if(password1.length < 8 || password2.length < 8) {
 			alert('パスワードは8文字以上にしてください。');
+			return false;
 		}
 		return true;
 	};
